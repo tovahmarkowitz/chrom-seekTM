@@ -172,7 +172,7 @@ rule genrich:
             -v \\
             -d 150 \\
             -m 5 \\
-            -e chrM,chrY
+            -e chrM,chrY,MT,Y
         """
 
     

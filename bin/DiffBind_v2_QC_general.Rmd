@@ -1,5 +1,5 @@
 ---
-title: "DiffBind: cfChIP-seq QC"
+title: "DiffBind: chrom-seek QC"
 output: 
     html_document:
         toc: true
@@ -11,10 +11,11 @@ output:
         fig_height: 6
 params:
     csvfile: ""
-    umapfile: ""
+    pcafile: ""
     counts_bed: ""
     counts_csv: ""
     peakcaller: ""
+    pca_code: ""
 ---
 
 <style type="text/css">
@@ -28,9 +29,10 @@ params:
 dateandtime<-format(Sys.time(), "%a %b %d %Y - %X")
 peakcaller <- params$peakcaller
 csvfile <- params$csvfile
-umapfile <- params$umapfile
+pcafile <- params$pcafile
 counts_bed <- params$counts_bed
 counts_csv <- params$counts_csv
+pca_code <- params$pca_code
 ```
 
 **Peak sources:**
@@ -107,11 +109,12 @@ if ( peakcaller == "macsNarrow" ) {
 
 ```{r DBcount}
 
-if ( sum(samples$class["Condition",] != "") == ncol(samples$class) ) {
-  minOv <- min(table(samples$samples$Condition))
-} else {
-  minOv <- floor(ncol(samples$class)/3)
-}
+#if ( sum(samples$class["Condition",] != "") == ncol(samples$class) ) {
+#  minOv <- min(table(samples$samples$Condition))
+#} else {
+#  minOv <- floor(ncol(samples$class)/3)
+#}
+minOv <- 2
 
 print(paste0("The minimum number of overlaps is: ", minOv))
 
@@ -133,13 +136,36 @@ try(dba.plotHeatmap(DBdataCounts,main="",cexRow=1,cexCol=1),silent=TRUE)
 ## Heatmap: Average signal across each peak
 1000 most variable consensus peaks (library-size normalized counts)
 ```{r heatmap3}
-try(dba.plotHeatmap(DBdataCounts,correlations=FALSE,cexRow=1,cexCol=1,colScheme="YlBuGn"),silent=TRUE)
+try(dba.plotHeatmap(DBdataCounts,correlations=FALSE,cexRow=1,cexCol=1,colScheme="YlGnBu"),silent=TRUE)
 ```
 
 ## PCA: Peaks and reads
 Variation of library-size normalized counts of consensus peaks
-```{r PCA2, fig.height=5,fig.width=5}
-try(dba.plotPCA(DBdataCounts),silent=TRUE)
+```{r PCA_calc}
+source(pca_code)
+PCAbasic(DBdataCounts,pcafile)
+
+pcaData <- read.delim(pcafile)
+
+c1p <- as.numeric(gsub("PC1 %: ","",rownames(pcaData)[nrow(pcaData)-2]))
+c2p <- as.numeric(gsub("PC2 %: ","",rownames(pcaData)[nrow(pcaData)-1]))
+c3p <- as.numeric(gsub("PC3 %: ","",rownames(pcaData)[nrow(pcaData)]))
+
+pcaData <- pcaData[grep("%",rownames(pcaData),invert=T),]
+
+p <- ggplot(data=pcaData,aes(x=PC1,y=PC2))
+p + geom_point(aes(color=samples$samples$Condition),size=4) +
+     xlab(sprintf('PC1 [%2.0f%%]',c1p)) +
+     ylab(sprintf('PC2 [%2.0f%%]',c2p)) +
+     theme_bw() +
+     labs(color="Condition")
+
+p <- ggplot(data=pcaData,aes(x=PC2,y=PC3))
+p + geom_point(aes(color=samples$samples$Condition),size=4) +
+     xlab(sprintf('PC2 [%2.0f%%]',c2p)) +
+     ylab(sprintf('PC3 [%2.0f%%]',c3p)) +
+     theme_bw() +
+     labs(color="Condition")
 ```
 
 ```{r TMM}
@@ -155,52 +181,8 @@ write.csv(consensus2, counts_csv, row.names = F)
 
 write.table(consensus2[,c("seqnames","start","end","Peaks")],
     counts_bed, quote=F, sep="\t", row.names=F, col.names=F)
-
-counts_TMM_ALL <- consensus2
-rownames(counts_TMM_ALL) <- counts_TMM_ALL$Peaks
-counts_TMM_ALL$Peaks <- NULL
-
-counts_TMM_ALL <- counts_TMM_ALL %>% dplyr::select(5:ncol(.)) %>%
-  t() %>% log10() %>% as.data.frame(.)
-##UMAP coordinates
-set.seed(123)
-
-if (nrow(samples$samples) < 16) {
-  neighbors=nrow(samples$samples)-1
-  if (neighbors > 1) {
-    umap_coord <- umap(counts_TMM_ALL, n_neighbors=neighbors)
-  } else {
-    umap_coord <- umap(counts_TMM_ALL, n_neighbors=2)
-  }
-} else {
-  umap_coord <- umap(counts_TMM_ALL)
-}
-umap_coord <- as.data.frame(umap_coord$layout) %>% 
-              setNames(c("UMAP1", "UMAP2"))
-
-write.csv(umap_coord, umapfile, row.names = F)
 ```
 
-## UMAP: peaks and reads 
-```{r UMAP_plot}
-p <- ggplot(umap_coord,aes(x = UMAP1, y = UMAP2, label = samples$samples$SampleID))+ ##With labels
-  geom_point(aes(color=samples$samples$Condition), size = 3) +
-  theme_bw()+ ggtitle(paste0("log-transformed counts:", "n = ", nrow(umap_coord))) +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  labs(color = "Phenotypes") + theme(text=element_text(size=15))+
-  geom_text_repel(point.size = NA, size = 2.5)
-q <- ggplot(umap_coord,aes(x = UMAP1, y = UMAP2)) + ##No labels
-  geom_point(aes(color=samples$samples$Condition), size = 3) +
-  theme_bw()+ ggtitle(paste0("log-transformed counts:", "n = ", nrow(umap_coord))) +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  labs(color ="Phenotypes") +  theme(text=element_text(size=15))
-  ##geom_text_repel(point.size = NA, size = 2.5)
-p
-
-if ( sum(samples$class["Condition",] != "") == ncol(samples$class) ) {
-q
-}
-```
 
 ## R tool version information
 ```{r Info}
